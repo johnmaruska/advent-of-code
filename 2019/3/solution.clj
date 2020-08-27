@@ -16,58 +16,81 @@
 
 ;;; where a wire goes
 
+(defn interpret [instruction]
+  {:direction (subs instruction 0 1)
+   :distance  (Integer/parseInt (subs instruction 1))})
+
 (defn coord-range
   "Get all 1D coordinates from `start` a given `distance` away in `sign` direction.
   `sign` should be either `+` or `-`"
   [start sign distance]
   (range (sign start 1) (sign start distance 1) (sign 1)))
 
-(defn interpret-instruction [[x y] instruction]
-  (let [direction (subs instruction 0 1)
-        distance  (Integer/parseInt (subs instruction 1))]
+(defn next-coords [start direction distance]
+  (let [[x y] (:coord start)]
     (case direction
       "R" (map #(vector % y) (coord-range x + distance))
       "U" (map #(vector x %) (coord-range y + distance))
       "L" (map #(vector % y) (coord-range x - distance))
       "D" (map #(vector x %) (coord-range y - distance)))))
 
+(defn steps-from [start] (drop (inc start) (range)))
+
+(defn with-steps [coords init-step]
+  (map (fn [coord step] {:coord coord :step step})
+       coords
+       (steps-from init-step)))
+
+(defn next-units [start direction distance]
+  (with-steps (next-coords start direction distance) (:step start)))
+
+(defn get-next-occupied [curr-coord instruction]
+  (let [{:keys [direction distance]} (interpret instruction)]
+    (next-units curr-coord direction distance)))
+
 (defn get-occupied-coordinates [wire]
   (loop [occupied-coords []
-         curr-coord      [0 0]
+         curr-coord      {:coord [0 0] :step 0}
          instructions    wire]
-    (let [newly-occupied (interpret-instruction curr-coord (first instructions))
+    (let [newly-occupied (get-next-occupied curr-coord (first instructions))
           all-occupied   (concat occupied-coords newly-occupied)]
       (if (not (empty? (rest instructions)))
         (recur all-occupied
                (last newly-occupied)
                (rest instructions))
-        (concat occupied-coords newly-occupied)))))
+        all-occupied))))
 
 ;;; where wires intersect
 
+(defn find-shared-coords [w1 w2]
+  (set/intersection (set (map :coord w1))
+                    (set (map :coord w2))))
+
 (defn find-intersections [w1 w2]
-  (set/intersection (set w1) (set w2)))
+  (let [shared  (find-shared-coords w1 w2)
+        shared? #(contains? shared (:coord %))]
+    (map (fn [m1 m2] {:w1 m1 :w2 m2})
+         (sort-by :coord (filter shared? w1))
+         (sort-by :coord (filter shared? w2)))))
 
 ;;; dealing with intersections
-
 (defn magnitude [n] (if (neg? n) (- n) n))
 
-(defn distance-from-central-port
-  "Calculate Manhattan distance from central port.
+(defn manhattan-distance [{:keys [w1 w2]}]
+  (reduce + (map magnitude (:coord w1))))
 
-  Coordinates are numerical pairs.
-  Central-port is defined as the coordinate [0 0]."
-  [coordinate]
-  (reduce + (map magnitude coordinate)))
+(defn signal-distance [{:keys [w1 w2]}]
+  (+ (:step w1) (:step w2)))
 
-(defn closest-distance-from-central [coords]
-  (apply min (map distance-from-central-port coords)))
+(defn closest [f ms] (apply min (map f ms)))
+
+(defn intersections [input]
+  (->> (get-wires input)
+       (map get-occupied-coordinates)
+       (apply find-intersections)))
 
 (defn part1 [input]
-  (->> input
-       get-wires
-       (map get-occupied-coordinates)
-       (apply find-intersections)
-       closest-distance-from-central))
+  (closest manhattan-distance (intersections input)))
 
-(println "Result:" (part1 "input.txt"))
+(defn part2 [input]
+  (closest signal-distance (intersections input)))
